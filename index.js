@@ -14,21 +14,37 @@ app.use((req, res, next) => {
   next()
 })
 
-let browser;
+let browser = null
+let browserRestarting = false
 
 async function launchBrowser() {
+  if (browserRestarting) return
+  browserRestarting = true
   try {
+    if (browser) {
+      try { await browser.close() } catch {}
+    }
     browser = await chromium.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions'
+      ]
     })
     browser.on('disconnected', () => {
-      console.log('Browser crashed, restarting...')
-      setTimeout(launchBrowser, 2000)
+      console.log('Browser disconnected, restarting in 3s...')
+      browser = null
+      setTimeout(launchBrowser, 3000)
     })
     console.log('Browser launched!')
   } catch (e) {
-    console.error('Browser launch failed:', e.message)
-    setTimeout(launchBrowser, 3000)
+    console.error('Browser launch failed:', e.message, '— retrying in 5s')
+    setTimeout(launchBrowser, 5000)
+  } finally {
+    browserRestarting = false
   }
 }
 
@@ -52,7 +68,7 @@ app.get('/info', async (req, res) => {
   if (cached) return res.json({ ...cached, cached: true })
 
   if (!browser || !browser.isConnected()) {
-    return res.status(503).json({ error: 'Browser not ready, try again in a few seconds' })
+    return res.status(503).json({ error: 'Browser restarting, try again in a few seconds' })
   }
 
   let page;
@@ -123,7 +139,7 @@ app.get('/info', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Failed to extract: ' + e.message })
   } finally {
-    if (page) await page.close()
+    if (page) { try { await page.close() } catch {} }
   }
 })
 
